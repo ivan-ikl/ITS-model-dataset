@@ -35,6 +35,7 @@
         fill-opacity: .1;
         stroke-opacity: 1;
     }
+
     #draggable {
         text-anchor: start;
         cursor: pointer;
@@ -128,33 +129,49 @@
                 .strength(function (d) {
                     if (d.type == "network-software") {
 
-                        return 0.03
+                        return 0.05
                     } else {
                         return 0.28
                     }
                 }).distance(function (d) {
-                    if (d.type == "network-software") {
-                        return 100
+                    if (d.type == "computer") {
+                        return 30
                     } else if (d.type == "service") {
-                        return 80
+                        return 120
                     } else if (d.type == "user-service") {
-                        return 100
-                    } else if (d.type == "computer") {
-                        if (d.target.id.includes("remote_administration_tools")) {
-                            return 60
+                        return 190
+                    } else if (d.type == "network-software") {
+                        return 170
+                    } else if (d.type == "principal") {
+                        return 210
+                    } else if (d.type == "person") {
+                        if (d.source.id == "admin") {
+                            return 70
+                        } else if (d.source.id == "ceo:ceo") {
+                            return 70
                         } else {
-                            return 40
+                            return 200
                         }
-                    } else if (d.type == "user") {
-                        return 150
+                    } else if (d.type == "software-data") {
+                        return 140
+                    } else {
+                        return 70
                     }
                 }))
-            .force('charge', d3.forceManyBody().strength(-110).distanceMax(250))
+            .force('charge', d3.forceManyBody().strength(-80).distanceMax(300))
             .force('center', d3.forceCenter(width / 2, height / 2));
 
-    d3.json('https://raw.githubusercontent.com/ivan-ikl/ITS-model-dataset/main/demo-financial-institution/3-rules-5-roles/outputs/outputs-5-100-0.json', function (error, results) {
+    d3.json('https://raw.githubusercontent.com/ivan-ikl/ITS-model-dataset/main/demo-financial-institution/3-rules-5-roles/outputs/outputs-5-900-0.json', function (error, results) {
         if (error) throw error;
         let computers = results.computers
+        let rules = results.firewall_rules
+        let data = results.data
+        let nodesSet = new Set()
+        let principalLinkMap = {}
+        let normalLinkMap = {}
+        let principalFullName = {}
+        let principalSoftwares = new Set()
+        let nodeType = {}
         let nodes = []
         let links = []
         let nodeNameIndex = {}
@@ -165,6 +182,13 @@
         let allSoftware = new Set()
         let computerSoftware = {}
         let computerSameCount = {}
+
+        // filter
+        let filteredRules = []
+        filteredRules.push("firewall-rule-042e83da-d00e-44ec-a0ca-dc05f21ee1aa")
+        filteredRules.push("firewall-rule-ff810c53-e056-461e-a288-108e25d973e8")
+        filteredRules.push("firewall-rule-3e554a40-29c2-4241-9919-2b6b54c98bbc")
+
         // network segments
         for (let computer in computers) {
             let networkSegments = computers[computer]["network_idn"]
@@ -228,6 +252,130 @@
             }
         }
 
+        // data
+        for (let d in data) {
+            // if (!(d.includes("FinancialData:banking"))) {
+            //     continue
+            // }
+            if (data[d]["principal_software"] == undefined) {
+                continue
+            }
+            principalSoftwares.add(data[d]["principal_software"])
+        }
+        for (let software of principalSoftwares) {
+            for (let computer in computers) {
+                for (let softwareIdn of computers[computer]["installed_software_idns"]) {
+                    if (softwareIdn.includes(software)) {
+                        principalFullName[software] = softwareIdn
+                    }
+                }
+            }
+        }
+        for (let d in data) {
+            // if (!(d.includes("FinancialData:banking"))) {
+            //     continue
+            // }
+            if (data[d]["principal_software"] == undefined) {
+                continue
+            }
+            nodesSet.add(d)
+            nodeType[d] = "data"
+            nodesSet.add(principalFullName[data[d]["principal_software"]])
+            nodeType[principalFullName[data[d]["principal_software"]]] = "software"
+            principalLinkMap[d] = principalFullName[data[d]["principal_software"]]
+        }
+        for (let computer in computers) {
+            for (let software in computers[computer]["software_data_links"]) {
+                if (ONLY_ZERO_INDEX) {
+                    if (!zeroIndexSoftware.has(software)) {
+                        continue
+                    }
+                }
+                let dataLinks = computers[computer]["software_data_links"][software]
+                if (dataLinks == undefined || dataLinks.length == 0) {
+                    continue
+                }
+                // let hasFinancialData = false
+                // for (let d of dataLinks) {
+                //     if (d.includes("FinancialData:banking")) {
+                //         hasFinancialData = true
+                //         break
+                //     }
+                // }
+                // if (!hasFinancialData) {
+                //     continue
+                // }
+                nodesSet.add(software)
+                nodeType[software] = "software"
+                for (let d of dataLinks) {
+                    if (principalLinkMap[d] == software) {
+                        continue
+                    }
+                    // if (!(d.includes("FinancialData:banking"))) {
+                    //     continue
+                    // }
+                    if (!(d in normalLinkMap)) {
+                        normalLinkMap[d] = []
+                    }
+                    normalLinkMap[d].push(software)
+                    nodesSet.add(d)
+                    nodeType[d] = "data"
+                }
+            }
+        }
+
+        for (let d in data) {
+            if (normalLinkMap[d] == undefined) {
+                nodesSet.delete(d)
+            }
+        }
+        for (let nod of nodesSet) {
+            nodes.push({
+                "id": nod,
+                "type": nodeType[nod]
+            })
+            nodeNameIndex[nod] = nodes.length - 1
+        }
+        for (let d in principalLinkMap) {
+            if (!nodesSet.has(d)) {
+                continue
+            }
+            links.push({
+                "source": nodes[nodeNameIndex[d]],
+                "target": nodes[nodeNameIndex[principalLinkMap[d]]],
+                "type": "principal",
+            })
+        }
+        for (let d in normalLinkMap) {
+            for (software of normalLinkMap[d]) {
+                links.push({
+                    "source": nodes[nodeNameIndex[d]],
+                    "target": nodes[nodeNameIndex[software]],
+                    "type": "software-data",
+                })
+            }
+        }
+        for (d in data) {
+            if (nodeNameIndex[d] == undefined) {
+                continue
+            }
+            let personGroups = data[d]["person_groups"]
+            for (let personGroup of personGroups) {
+                if (nodeNameIndex[personGroup] == undefined) {
+                    nodes.push({
+                        "id": personGroup,
+                        "type": "person",
+                    })
+                    nodeNameIndex[personGroup] = nodes.length - 1
+                }
+                links.push({
+                    "source": nodes[nodeNameIndex[personGroup]],
+                    "target": nodes[nodeNameIndex[d]],
+                    "type": "person",
+                })
+            }
+        }
+
         // network services
         for (let computer in computers) {
             for (let softwareIdn in computers[computer]["installed_software"]) {
@@ -239,8 +387,12 @@
                 if (services.length == 0) {
                     continue
                 }
-                if (softwareIdn.includes("Internet_connection")) {
-                    continue
+                if (nodeNameIndex[computer] == undefined) {
+                    nodes.push({
+                        "id": computer,
+                        "type": "computer",
+                    })
+                    nodeNameIndex[computer] = nodes.length - 1
                 }
                 if (nodeNameIndex[softwareIdn] == undefined) {
                     nodes.push({
@@ -249,21 +401,22 @@
                     })
                     nodeNameIndex[softwareIdn] = nodes.length - 1
                 }
-                for (let service of services) {
-                    let serviceFullName = service + "-" + softwareIdn
-                    if (nodeNameIndex[serviceFullName] == undefined) {
-                        nodes.push({
-                            "id": serviceFullName,
-                            "type": "service",
-                        })
-                        nodeNameIndex[serviceFullName] = nodes.length - 1
-                    }
-                    links.push({
-                        "source": nodes[nodeNameIndex[softwareIdn]],
-                        "target": nodes[nodeNameIndex[serviceFullName]],
-                        "type": "service",
-                    })
-                }
+                // for (let service of services) {
+                //     let serviceFullName = service + "-" + softwareIdn
+                //     if (service == "Internet") continue
+                //     if (nodeNameIndex[serviceFullName] == undefined) {
+                //         nodes.push({
+                //             "id": serviceFullName,
+                //             "type": "service",
+                //         })
+                //         nodeNameIndex[serviceFullName] = nodes.length - 1
+                //     }
+                //     links.push({
+                //         "source": nodes[nodeNameIndex[softwareIdn]],
+                //         "target": nodes[nodeNameIndex[serviceFullName]],
+                //         "type": "service",
+                //     })
+                // }
             }
         }
 
@@ -278,6 +431,13 @@
                 if (services.length == 0) {
                     continue
                 }
+                if (nodeNameIndex[computer] == undefined) {
+                    nodes.push({
+                        "id": computer,
+                        "type": "computer",
+                    })
+                    nodeNameIndex[computer] = nodes.length - 1
+                }
                 if (nodeNameIndex[softwareIdn] == undefined) {
                     nodes.push({
                         "id": softwareIdn,
@@ -285,26 +445,26 @@
                     })
                     nodeNameIndex[softwareIdn] = nodes.length - 1
                 }
-                for (let service of services) {
-                    let serviceFullName = service + "-" + softwareIdn
-                    if (nodeNameIndex[serviceFullName] == undefined) {
-                        nodes.push({
-                            "id": serviceFullName,
-                            "type": "user-service",
-                        })
-                        nodeNameIndex[serviceFullName] = nodes.length - 1
-                    }
-                    links.push({
-                        "source": nodes[nodeNameIndex[softwareIdn]],
-                        "target": nodes[nodeNameIndex[serviceFullName]],
-                        "type": "user-service",
-                    })
-                }
+                // for (let service of services) {
+                //     let serviceFullName = service + "-" + softwareIdn
+                //     if (nodeNameIndex[serviceFullName] == undefined) {
+                //         nodes.push({
+                //             "id": serviceFullName,
+                //             "type": "user-service",
+                //         })
+                //         nodeNameIndex[serviceFullName] = nodes.length - 1
+                //     }
+                //     links.push({
+                //         "source": nodes[nodeNameIndex[softwareIdn]],
+                //         "target": nodes[nodeNameIndex[serviceFullName]],
+                //         "type": "user-service",
+                //     })
+                // }
             }
         }
+
         // computers
         for (let computer in computers) {
-            let firstUser = true
             for (let software of computers[computer]["installed_software_idns"]) {
                 if (nodeNameIndex[software] == undefined) {
                     continue
@@ -321,27 +481,9 @@
                     "target": nodes[nodeNameIndex[software]],
                     "type": "computer",
                 })
-                if (firstUser) {
-                    firstUser = false
-                    let user = computers[computer]["installed_software"][software]["person_group_id"]
-                    if (user == undefined || user == null) {
-                        continue
-                    }
-                    if (nodeNameIndex[user] == undefined) {
-                        nodes.push({
-                            "id": user,
-                            "type": "user"
-                        })
-                        nodeNameIndex[user] = nodes.length - 1
-                    }
-                    links.push({
-                        "source": nodes[nodeNameIndex[computer]],
-                        "target": nodes[nodeNameIndex[user]],
-                        "type": "user",
-                    })
-                }
             }
         }
+
         // software networks
         for (let network in networkSoftware) {
             let softwareIdns = networkSoftware[network]
@@ -363,6 +505,7 @@
                 }
             }
         }
+
         // computer networks
         for (let network in networkComputers) {
             let computerIdns = networkComputers[network]
@@ -384,6 +527,7 @@
                 }
             }
         }
+
 
         // create groups, links and nodes
         groups = svg.append('g').attr('class', 'groups');
@@ -458,15 +602,19 @@
             .attr("xlink:href", function (d) {
                 if (d.type === "software") {
                     return "https://raw.githubusercontent.com/ivan-ikl/ITS-model-dataset/main/visualization-images/binary.png";
+                } else if (d.type === "internet") {
+                    return "https://raw.githubusercontent.com/ivan-ikl/ITS-model-dataset/main/visualization-images/internet.png"
                 } else if (d.type == "computer") {
                     return "https://raw.githubusercontent.com/ivan-ikl/ITS-model-dataset/main/visualization-images/computer.png"
                 } else if (d.type == "service") {
-                    return "https://raw.githubusercontent.com/ivan-ikl/ITS-model-dataset/main/visualization-images/service.png"
+                    return "https://github.com/ivan-ikl/ITS-model-dataset/blob/main/visualization-images/service.png"
                 } else if (d.type == "user-service") {
                     return "https://raw.githubusercontent.com/ivan-ikl/ITS-model-dataset/main/visualization-images/customer.png"
-                } else if (d.type == "user") {
+                } else if (d.type == "person") {
                     return "https://raw.githubusercontent.com/ivan-ikl/ITS-model-dataset/main/visualization-images/user.png"
-                } 
+                } else if (d.type == "data") {
+                    return "https://raw.githubusercontent.com/ivan-ikl/ITS-model-dataset/main/visualization-images/database.png"
+                }
             })
             .attr("x", function (d) {
                 return -15
@@ -547,21 +695,7 @@
             .attr("dx", 0)
             .attr("dy", 23)
             .text(function (d) {
-                if (d.type == "computer") {
-                    let name = ""
-                    for (let i = 0; i < d.id.length; i++) {
-                        if (d.id[i] == ":") {
-                            name += "."
-                        } else {
-                            name += d.id[i]
-                        }
-                    }
-                    return name.replace("None", "Server")
-                } else if (d.type == "service" || d.type == "user-service") {
-                    return d.id.split("-")[0]
-                } else if (d.type == "user") {
-                    return d.id
-                } else {
+                if (d.type == "software") {
                     let softwareName = d.id.split(">")[1].split("#")[0]
                     let name = softwareTextMapper[softwareName]
                     if (name == "Microsoft Office") {
@@ -573,6 +707,20 @@
                     } else {
                         return name
                     }
+                } else if (d.type == "person") {
+                    return d.id
+                } else if (d.type == "computer") {
+                    let name = ""
+                    for (let i = 0; i < d.id.length; i++) {
+                        if (d.id[i] == ":") {
+                            name += "."
+                        } else {
+                            name += d.id[i]
+                        }
+                    }
+                    return name.replace("None", "Server")
+                } else if (d.type == "data") {
+                    return d.id.split("#")[0]
                 }
             })
             .attr("text-anchor", "middle")
@@ -593,7 +741,15 @@
             })
             .attr("text-anchor", "middle")
             .attr("font-size", LABEL_FONT.toString() + "px")
-            .style("fill", "white")
+            .style("fill", function (d) {
+                if (d.type == "software") {
+                    return "black"
+                } else if (d.type == "computer") {
+                    return "white"
+                } else {
+                    return ""
+                }
+            })
 
         node.append('title')
             .text(function (d) { return d.id; })
@@ -631,30 +787,41 @@
                         return 1
                     }
                 })
+                .attr("marker-end", function (d) {
+                    if (d.type == "software") {
+                        return "url(#end)"
+                    } else {
+                        return ""
+                    }
+                })
                 .attr("stroke", function (d) {
-                    if (d.type == "service" || d.type == "user-service") {
+                    if (d.type == "software") {
                         return "black"
                     } else if (d.type == "computer") {
                         return "red"
                     } else if (d.type == "network-software") {
                         return "green"
+                    } else if (d.type == "principal") {
+                        return "blue"
                     } else {
                         return "black"
                     }
                 })
                 .attr("stroke-width", function (d) {
-                    if (d.type == "service" || d.type == "user-service") {
+                    if (d.type == "computer") {
                         return 1.0
                     } else {
-                        return 1.0
+                        return 2.0
                     }
                 }).style("stroke-dasharray", function (d) {
-                    if (d.type == "user") {
+                    if (d.type == "person") {
+                        return ("4")
+                    } else if (d.type == "software-data") {
                         return ("4")
                     } else {
                         return ("0")
                     }
-                });
+                })
             node
                 .attr('cx', function (d) { return d.x; })
                 .attr('cy', function (d) { return d.y; })
@@ -744,7 +911,7 @@
                 });
 
             d3.select(path.node().parentNode).attr('transform', function (d) {
-                let scaleFactor = 1.45
+                let scaleFactor = 1.2
                 if (groupIdCount[groupId] == 3) {
                     scaleFactor = 1.6
                 }
